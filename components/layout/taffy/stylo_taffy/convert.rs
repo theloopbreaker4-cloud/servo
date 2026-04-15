@@ -26,8 +26,7 @@ pub fn dimension(val: &stylo::Size) -> taffy::Dimension {
     match val {
         stylo::Size::LengthPercentage(val) => length_percentage(&val.0).into(),
         stylo::Size::Auto => taffy::Dimension::AUTO,
-
-        // TODO: implement other values in Taffy
+        // TODO: implement other values in Taffy (MAX_CONTENT/MIN_CONTENT not exposed as Dimension constants)
         stylo::Size::MaxContent => taffy::Dimension::AUTO,
         stylo::Size::MinContent => taffy::Dimension::AUTO,
         stylo::Size::FitContent => taffy::Dimension::AUTO,
@@ -45,8 +44,7 @@ pub fn max_size_dimension(val: &stylo::MaxSize) -> taffy::Dimension {
     match val {
         stylo::MaxSize::LengthPercentage(val) => length_percentage(&val.0).into(),
         stylo::MaxSize::None => taffy::Dimension::AUTO,
-
-        // TODO: implement other values in Taffy
+        // TODO: implement other values in Taffy (MAX_CONTENT/MIN_CONTENT not exposed as Dimension constants)
         stylo::MaxSize::MaxContent => taffy::Dimension::AUTO,
         stylo::MaxSize::MinContent => taffy::Dimension::AUTO,
         stylo::MaxSize::FitContent => taffy::Dimension::AUTO,
