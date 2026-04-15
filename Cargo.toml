@@ -10,7 +10,7 @@ default-members = ["ports/servoshell"]
 exclude = [".cargo", "support/crown"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.2"
 authors = ["The Servo Project Developers"]
 repository = "https://github.com/servo/servo"
 # A generic description for packages that don't have a meaningful description yet.

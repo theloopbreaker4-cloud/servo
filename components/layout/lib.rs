@@ -9,6 +9,7 @@
 
 mod cell;
 mod context;
+pub(crate) mod counters;
 mod display_list;
 mod dom;
 mod dom_traversal;

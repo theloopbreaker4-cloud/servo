@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::process;
 use std::rc::Rc;
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, LazyLock, OnceLock};
 
 use app_units::Au;
 use bitflags::bitflags;
@@ -81,6 +81,7 @@ use webrender_api::ExternalScrollId;
 use webrender_api::units::{DevicePixel, LayoutVector2D};
 
 use crate::context::{CachedImageOrError, ImageResolver, LayoutContext};
+use crate::counters::{CounterState, build_counter_state};
 use crate::display_list::{DisplayListBuilder, HitTest, PaintTimingHandler, StackingContextTree};
 use crate::query::{
     find_character_offset_in_fragment_descendants, get_the_text_steps, process_box_area_request,
@@ -1041,7 +1042,16 @@ impl LayoutThread {
             use_rayon: rayon_pool.is_some(),
             image_resolver: image_resolver.clone(),
             painter_id: self.webview_id.into(),
+            counter_state: OnceLock::new(),
         };
+
+        // Build CSS counter state with a pre-order DOM walk before box tree construction.
+        // This must happen after style has been computed (recalc_style_traversal run above).
+        {
+            let mut state = CounterState::new();
+            build_counter_state(&layout_context, root_element.as_node(), &mut state);
+            let _ = layout_context.counter_state.set(Arc::new(state));
+        }
 
         let restyle = reflow_request
             .restyle
