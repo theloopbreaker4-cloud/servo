@@ -803,7 +803,14 @@ impl FlexContainer {
             AlignFlags::SPACE_AROUND => remaining_free_cross_space / num_lines as i32 / 2,
             AlignFlags::SPACE_EVENLY => remaining_free_cross_space / (num_lines as i32 + 1),
 
-            // TODO: Implement all alignments. Note: not all alignment values are valid for content distribution
+            // https://drafts.csswg.org/css-align/#valdef-self-position-self-start
+            // In a flex container, self-start / self-end behave as start / end.
+            AlignFlags::SELF_START => Au::zero(),
+            AlignFlags::SELF_END => remaining_free_cross_space,
+            // left / right are physical and map to start / end in the cross axis.
+            AlignFlags::LEFT | AlignFlags::RIGHT => Au::zero(),
+            // anchor-center is not applicable to content distribution; treat as center.
+            AlignFlags::ANCHOR_CENTER => remaining_free_cross_space / 2,
             _ => Au::zero(),
         };
 
@@ -1079,8 +1086,13 @@ fn allocate_free_cross_space_for_flex_line(
             Au::zero(),
             remaining_free_cross_space / (remaining_line_count + 1),
         ),
-
-        // TODO: Implement all alignments. Note: not all alignment values are valid for content distribution
+        // self-start / self-end / left / right / anchor-center are not distribution keywords;
+        // the cursor-based positioning handles them, so no per-line space to add.
+        AlignFlags::SELF_START |
+        AlignFlags::SELF_END |
+        AlignFlags::LEFT |
+        AlignFlags::RIGHT |
+        AlignFlags::ANCHOR_CENTER => (Au::zero(), Au::zero()),
         _ => (Au::zero(), Au::zero()),
     }
 }
@@ -1677,13 +1689,18 @@ impl InitialFlexLineLayout<'_> {
                     free_space_in_main_axis
                 }
             },
-            AlignFlags::CENTER => free_space_in_main_axis / 2,
+            AlignFlags::CENTER | AlignFlags::ANCHOR_CENTER => free_space_in_main_axis / 2,
             AlignFlags::STRETCH => Au::zero(),
             AlignFlags::SPACE_BETWEEN => Au::zero(),
             AlignFlags::SPACE_AROUND => (free_space_in_main_axis / item_count as i32) / 2,
             AlignFlags::SPACE_EVENLY => free_space_in_main_axis / (item_count + 1) as i32,
-
-            // TODO: Implement all alignments. Note: not all alignment values are valid for content distribution
+            // self-start / self-end in justify-content context behave as start / end.
+            AlignFlags::SELF_START => Au::zero(),
+            AlignFlags::SELF_END => free_space_in_main_axis,
+            // left / right are physical inline-axis values; in flex-row they map naturally,
+            // in flex-column they are treated as start/end per spec.
+            AlignFlags::LEFT => Au::zero(),
+            AlignFlags::RIGHT => free_space_in_main_axis,
             _ => Au::zero(),
         };
 
@@ -1692,13 +1709,13 @@ impl InitialFlexLineLayout<'_> {
             AlignFlags::FLEX_START => Au::zero(),
             AlignFlags::END => Au::zero(),
             AlignFlags::FLEX_END => Au::zero(),
-            AlignFlags::CENTER => Au::zero(),
+            AlignFlags::CENTER | AlignFlags::ANCHOR_CENTER => Au::zero(),
             AlignFlags::STRETCH => Au::zero(),
+            AlignFlags::SELF_START | AlignFlags::SELF_END => Au::zero(),
+            AlignFlags::LEFT | AlignFlags::RIGHT => Au::zero(),
             AlignFlags::SPACE_BETWEEN => free_space_in_main_axis / (item_count - 1) as i32,
             AlignFlags::SPACE_AROUND => free_space_in_main_axis / item_count as i32,
             AlignFlags::SPACE_EVENLY => free_space_in_main_axis / (item_count + 1) as i32,
-
-            // TODO: Implement all alignments. Note: not all alignment values are valid for content distribution
             _ => Au::zero(),
         };
         let item_main_interval = item_main_interval + main_gap;

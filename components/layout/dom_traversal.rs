@@ -19,6 +19,7 @@ use style::values::specified::Quotes;
 use crate::context::LayoutContext;
 use crate::dom::{BoxSlot, LayoutBox, NodeExt};
 use crate::flow::inline::SharedInlineStyles;
+use crate::counters;
 use crate::lists::generate_counter_representation;
 use crate::quotes::quotes_for_lang;
 use crate::replaced::ReplacedContents;
@@ -384,11 +385,32 @@ pub(crate) fn generate_pseudo_element_content(
                             vec.push(PseudoElementContentItem::Text(quote));
                         }
                     },
-                    ContentItem::Counter(_, style) | ContentItem::Counters(_, _, style) => {
-                        // TODO: Add support for counters, this assumes a value of 0.
-                        vec.push(PseudoElementContentItem::Text(
-                            generate_counter_representation(style).to_string(),
-                        ));
+                    ContentItem::Counter(name, style) => {
+                        let text = if let Some(cs) = context.counter_state.get() {
+                            counters::resolve_counter(
+                                cs,
+                                pseudo_element_info.node.opaque(),
+                                name,
+                                style,
+                            )
+                        } else {
+                            generate_counter_representation(style).to_string()
+                        };
+                        vec.push(PseudoElementContentItem::Text(text));
+                    },
+                    ContentItem::Counters(name, separator, style) => {
+                        let text = if let Some(cs) = context.counter_state.get() {
+                            counters::resolve_counters(
+                                cs,
+                                pseudo_element_info.node.opaque(),
+                                name,
+                                separator,
+                                style,
+                            )
+                        } else {
+                            generate_counter_representation(style).to_string()
+                        };
+                        vec.push(PseudoElementContentItem::Text(text));
                     },
                     ContentItem::NoOpenQuote | ContentItem::NoCloseQuote => {},
                 }

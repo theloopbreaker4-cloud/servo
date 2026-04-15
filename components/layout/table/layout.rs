@@ -2864,7 +2864,7 @@ impl TableSlotCell {
     fn create_fragment(
         &self,
         mut layout: CellLayout,
-        cell_rect: LogicalRect<Au>,
+        mut cell_rect: LogicalRect<Au>,
         cell_baseline: Au,
         positioning_context: &mut PositioningContext,
         table_style: &ComputedValues,
@@ -2873,6 +2873,13 @@ impl TableSlotCell {
     ) -> BoxFragment {
         // This must be scoped to this function because it conflicts with euclid's Zero.
         use style::Zero as StyleZero;
+
+        // Apply position:relative offset for table cells.
+        // <https://www.w3.org/TR/css-position-3/#rel-pos>
+        if self.context.base.style.clone_position() == Position::Relative {
+            cell_rect.start_corner +=
+                relative_adjustement(&self.context.base.style, containing_block);
+        }
 
         let cell_content_rect = cell_rect.deflate(&(layout.padding + layout.border));
         let content_block_size = layout.layout.content_block_size;
