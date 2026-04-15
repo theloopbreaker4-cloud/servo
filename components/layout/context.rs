@@ -25,6 +25,10 @@ use style::dom::OpaqueNode;
 use style::values::computed::image::{Gradient, Image};
 use webrender_api::units::{DeviceIntSize, DeviceSize};
 
+use std::sync::OnceLock;
+
+use crate::counters::CounterState;
+
 pub(crate) type CachedImageOrError = Result<CachedImage, ResolveImageError>;
 
 pub(crate) struct LayoutContext<'a> {
@@ -45,6 +49,11 @@ pub(crate) struct LayoutContext<'a> {
 
     /// The [`PainterId`] that identifies which `RenderingContext` that this layout targets.
     pub painter_id: PainterId,
+
+    /// Pre-computed CSS counter state for the entire document.
+    /// Initialized after style traversal, before box tree construction.
+    pub counter_state: OnceLock<Arc<CounterState>>,
+
 }
 
 pub enum ResolvedImage<'a> {
