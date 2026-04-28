@@ -596,6 +596,7 @@ impl StackingContext {
         let effects = style.get_effects();
         let transform_style = style.get_used_transform_style();
         if effects.filter.0.is_empty() &&
+            effects.backdrop_filter.0.is_empty() &&
             effects.opacity == 1.0 &&
             effects.mix_blend_mode == ComputedMixBlendMode::Normal &&
             !style.has_effective_transform_or_perspective(FragmentFlags::empty()) &&
@@ -618,6 +619,44 @@ impl StackingContext {
                 effects.opacity.into(),
                 effects.opacity,
             ));
+        }
+
+        // Aurora patch (2026-04-26): emit backdrop-filter as a separate
+        // PushBackdropFilter display item before the stacking context. WebRender
+        // applies the filter chain to whatever is already painted underneath the
+        // stacking context's bounds, producing the spec-defined "frosted glass"
+        // effect. Without this the backdrop-filter property parses (since the
+        // stylo patch in v0.3.9) but renders nothing.
+        let backdrop_filters: Vec<wr::FilterOp> = effects
+            .backdrop_filter
+            .0
+            .iter()
+            .map(|filter| FilterToWebRender::to_webrender(filter, &current_color))
+            .collect();
+        if !backdrop_filters.is_empty() {
+            // Resolve spatial / clip ids first because builder.wr() takes &mut.
+            let bd_spatial_id = builder.spatial_id(self.scroll_tree_node_id);
+            let bd_clip_chain_id = self
+                .clip_id
+                .map(|clip_id| builder.clip_chain_id(clip_id))
+                .unwrap_or(wr::ClipChainId::INVALID);
+            // Bounds: fragment's border-box in local stacking-context coords.
+            let backdrop_bounds = LayoutRect::from_origin_and_size(
+                LayoutPoint::zero(),
+                fragment.border_rect().size.to_webrender(),
+            );
+            builder.wr().push_backdrop_filter(
+                &wr::CommonItemProperties::new(
+                    backdrop_bounds,
+                    wr::SpaceAndClipInfo {
+                        spatial_id: bd_spatial_id,
+                        clip_chain_id: bd_clip_chain_id,
+                    },
+                ),
+                &backdrop_filters,
+                &[],
+                &[],
+            );
         }
 
         // TODO(jdm): WebRender now requires us to create stacking context items

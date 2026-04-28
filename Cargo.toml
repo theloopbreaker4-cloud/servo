@@ -388,6 +388,20 @@ codegen-units = 1
 # stylo_malloc_size_of = { path = "../stylo/malloc_size_of" }
 # stylo_static_prefs = { path = "../stylo/stylo_static_prefs" }
 # stylo_traits = { path = "../stylo/style_traits" }
+
+# Aurora local stylo patch (2026-04-25): unblocks :has() selector and
+# backdrop-filter property parsing. Local clone is at d:/stylo, pinned
+# to the same upstream rev (96ceb5405b) plus two small patches in
+# style/servo/selector_parser.rs and style/properties/longhands.toml.
+[patch."https://github.com/servo/stylo"]
+selectors = { path = "d:/stylo/selectors" }
+servo_arc = { path = "d:/stylo/servo_arc" }
+stylo = { path = "d:/stylo/style" }
+stylo_atoms = { path = "d:/stylo/stylo_atoms" }
+stylo_dom = { path = "d:/stylo/stylo_dom" }
+stylo_malloc_size_of = { path = "d:/stylo/malloc_size_of" }
+stylo_static_prefs = { path = "d:/stylo/stylo_static_prefs" }
+stylo_traits = { path = "d:/stylo/style_traits" }
 #
 # Or for another Git dependency:
 #
