@@ -10,8 +10,8 @@ use std::sync::Arc;
 use crossbeam_channel::Sender;
 use dpi::PhysicalSize;
 use embedder_traits::{
-    InputEvent, InputEventAndId, InputEventId, InputEventResult, PaintHitTestResult,
-    ScreenshotCaptureError, Scroll, ViewportDetails, WebViewPoint, WebViewRect,
+    InputEvent, InputEventAndId, InputEventId, InputEventResult, MouseButton, MouseButtonAction,
+    PaintHitTestResult, ScreenshotCaptureError, Scroll, ViewportDetails, WebViewPoint, WebViewRect,
 };
 use euclid::{Point2D, Rect, Scale, Size2D};
 use gleam::gl::RENDERER;
@@ -132,6 +132,12 @@ pub(crate) struct Painter {
     /// A [`WebContentAnimator`] used to manage web content-derived animations. Currently this only
     /// manages blinking caret animations.
     web_content_animator: WebContentAnimator,
+
+    /// Aurora: active scrollbar drag, if any. While this is `Some`, mouse
+    /// events are routed to the scrollbar and never forwarded to script.
+    /// The `WebViewId` records which webview owns the dragged scrollbar so
+    /// stray events from a different webview don't disturb the drag.
+    aurora_drag: Option<(WebViewId, crate::scrollbar::DragState)>,
 }
 
 impl Drop for Painter {
@@ -284,6 +290,7 @@ impl Painter {
                 paint.event_loop_waker.clone_box(),
                 (*timer_refresh_driver).clone(),
             ),
+            aurora_drag: None,
         };
         painter.assert_gl_framebuffer_complete();
         painter.clear_background();
@@ -1332,6 +1339,14 @@ impl Painter {
         webview_id: WebViewId,
         event: InputEventAndId,
     ) -> bool {
+        // Aurora: intercept scrollbar interactions before forwarding to
+        // the webview renderer. If the event is consumed by a scrollbar
+        // (drag begin / drag move / drag end / track click), the page
+        // never sees it and we return early.
+        if self.try_handle_scrollbar_input(webview_id, &event.event) {
+            return true;
+        }
+
         self.webview_renderers
             .get_mut(&webview_id)
             .is_some_and(|webview_renderer| {
@@ -1356,6 +1371,223 @@ impl Painter {
 
                 webview_renderer.notify_input_event(&self.webrender_api, &self.needs_repaint, event)
             })
+    }
+
+    /// Aurora scrollbar mouse routing. Returns `true` if the event was
+    /// consumed by a scrollbar (drag or track click) and should NOT be
+    /// forwarded to the webview / page.
+    fn try_handle_scrollbar_input(
+        &mut self,
+        webview_id: WebViewId,
+        event: &InputEvent,
+    ) -> bool {
+        use crate::scrollbar::{self, DragAxis, ScrollbarHit};
+
+        let Some(webview_renderer) = self.webview_renderers.get(&webview_id) else {
+            return false;
+        };
+        let Some(root_pipeline_id) = webview_renderer.root_pipeline_id else {
+            return false;
+        };
+        let dppp = webview_renderer.device_pixels_per_page_pixel().get();
+        if dppp <= 0.0 {
+            return false;
+        }
+
+        // Convert WebViewPoint (device pixels) → CSS-pixel LayoutPoint
+        // matching the coordinate space scrollbar.rs draws and hit-tests in.
+        let to_css = |p: WebViewPoint| -> LayoutPoint {
+            let dp = p.as_device_point(webview_renderer.device_pixels_per_page_pixel());
+            LayoutPoint::new(dp.x / dppp, dp.y / dppp)
+        };
+
+        match event {
+            InputEvent::MouseButton(mouse) => {
+                match mouse.action {
+                    MouseButtonAction::Down if mouse.button == MouseButton::Left => {
+                        let cursor = to_css(mouse.point);
+                        let Some(details) = webview_renderer.pipelines.get(&root_pipeline_id)
+                        else {
+                            return false;
+                        };
+                        let Some(hit) = scrollbar::hit_test(&details.scroll_tree, cursor)
+                        else {
+                            return false;
+                        };
+                        match hit {
+                            ScrollbarHit::ThumbY {
+                                external_id,
+                                thumb_y,
+                                thumb_h,
+                                viewport_min_y,
+                                viewport_h,
+                                content_h,
+                            } => {
+                                let grab_offset = cursor.y - (viewport_min_y + thumb_y);
+                                self.aurora_drag = Some((
+                                    webview_id,
+                                    scrollbar::DragState {
+                                        external_id,
+                                        axis: DragAxis::Y,
+                                        grab_offset,
+                                        viewport_start: viewport_min_y,
+                                        viewport_size: viewport_h,
+                                        content_size: content_h,
+                                        thumb_size: thumb_h,
+                                    },
+                                ));
+                                true
+                            },
+                            ScrollbarHit::ThumbX {
+                                external_id,
+                                thumb_x,
+                                thumb_w,
+                                viewport_min_x,
+                                viewport_w,
+                                content_w,
+                            } => {
+                                let grab_offset = cursor.x - (viewport_min_x + thumb_x);
+                                self.aurora_drag = Some((
+                                    webview_id,
+                                    scrollbar::DragState {
+                                        external_id,
+                                        axis: DragAxis::X,
+                                        grab_offset,
+                                        viewport_start: viewport_min_x,
+                                        viewport_size: viewport_w,
+                                        content_size: content_w,
+                                        thumb_size: thumb_w,
+                                    },
+                                ));
+                                true
+                            },
+                            ScrollbarHit::TrackY {
+                                external_id,
+                                click_y,
+                                thumb_y,
+                                viewport_h,
+                                ..
+                            } => {
+                                let direction = if click_y < thumb_y { -1.0 } else { 1.0 };
+                                let page = viewport_h * 0.9 * direction;
+                                self.apply_scroll_delta(
+                                    webview_id,
+                                    external_id,
+                                    LayoutVector2D::new(0.0, page),
+                                );
+                                true
+                            },
+                            ScrollbarHit::TrackX {
+                                external_id,
+                                click_x,
+                                thumb_x,
+                                viewport_w,
+                                ..
+                            } => {
+                                let direction = if click_x < thumb_x { -1.0 } else { 1.0 };
+                                let page = viewport_w * 0.9 * direction;
+                                self.apply_scroll_delta(
+                                    webview_id,
+                                    external_id,
+                                    LayoutVector2D::new(page, 0.0),
+                                );
+                                true
+                            },
+                        }
+                    },
+                    MouseButtonAction::Up if mouse.button == MouseButton::Left => {
+                        if self.aurora_drag.is_some() {
+                            self.aurora_drag = None;
+                            return true;
+                        }
+                        false
+                    },
+                    _ => false,
+                }
+            },
+            InputEvent::MouseMove(move_event) => {
+                let Some((drag_webview_id, state)) = self.aurora_drag else {
+                    return false;
+                };
+                if drag_webview_id != webview_id {
+                    return false;
+                }
+                let cursor = to_css(move_event.point);
+                let existing = self.scroll_offset_for(webview_id, state.external_id);
+                let new_offset = scrollbar::drag_offset_to_vector(&state, cursor, existing);
+                self.set_scroll_offset_absolute(webview_id, state.external_id, new_offset);
+                true
+            },
+            _ => false,
+        }
+    }
+
+    /// Read the current scroll offset for an external scroll id, or
+    /// (0, 0) if not found. Used to preserve cross-axis offset when only
+    /// one axis is being dragged.
+    fn scroll_offset_for(
+        &self,
+        webview_id: WebViewId,
+        external_id: ExternalScrollId,
+    ) -> LayoutVector2D {
+        let Some(webview_renderer) = self.webview_renderers.get(&webview_id) else {
+            return LayoutVector2D::zero();
+        };
+        for details in webview_renderer.pipelines.values() {
+            for node in details.scroll_tree.nodes.iter() {
+                if node.external_id() == Some(external_id) {
+                    return node.offset().unwrap_or(LayoutVector2D::zero());
+                }
+            }
+        }
+        LayoutVector2D::zero()
+    }
+
+    /// Add a delta to the current scroll offset for an external scroll id.
+    fn apply_scroll_delta(
+        &mut self,
+        webview_id: WebViewId,
+        external_id: ExternalScrollId,
+        delta: LayoutVector2D,
+    ) {
+        let current = self.scroll_offset_for(webview_id, external_id);
+        self.set_scroll_offset_absolute(webview_id, external_id, current + delta);
+    }
+
+    /// Move the scroll node identified by `external_id` to `offset`.
+    /// Computes the delta from the current offset and applies it through
+    /// the existing scroll-tree machinery so clamping, observer hooks,
+    /// and WebRender transactions all fire as for a normal scroll input.
+    fn set_scroll_offset_absolute(
+        &mut self,
+        webview_id: WebViewId,
+        external_id: ExternalScrollId,
+        offset: LayoutVector2D,
+    ) {
+        let current = self.scroll_offset_for(webview_id, external_id);
+        let delta = offset - current;
+        if delta.x.abs() < 0.5 && delta.y.abs() < 0.5 {
+            return;
+        }
+        let mut scroll_results = Vec::new();
+        if let Some(webview_renderer) = self.webview_renderers.get_mut(&webview_id) {
+            for details in webview_renderer.pipelines.values_mut() {
+                if let Some((id, new_offset)) = details.scroll_tree.scroll_node_or_ancestor(
+                    external_id,
+                    webrender_api::ScrollLocation::Delta(delta),
+                    ScrollType::InputEvents,
+                ) {
+                    scroll_results.push(ScrollResult {
+                        external_scroll_id: id,
+                        offset: new_offset,
+                    });
+                    break;
+                }
+            }
+        }
+        if !scroll_results.is_empty() {
+            self.send_zoom_and_scroll_offset_updates(false, scroll_results);
+        }
     }
 
     pub(crate) fn notify_scroll_event(
