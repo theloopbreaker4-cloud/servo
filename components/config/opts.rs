@@ -128,6 +128,7 @@ impl DiagnosticsLogging {
     /// In non-production builds, this will automatically read and parse the
     /// SERVO_DIAGNOSTICS environment variable if it is set.
     pub fn new() -> Self {
+        #[cfg_attr(not(debug_assertions), allow(unused_mut))]
         let mut config: DiagnosticsLogging = Default::default();
 
         // Disabled for production builds

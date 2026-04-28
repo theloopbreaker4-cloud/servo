@@ -40,7 +40,9 @@ use profile_traits::{mem, time};
 use rustc_hash::FxHashMap;
 use script::{JSEngineSetup, ServiceWorkerManager};
 use servo_background_hang_monitor::HangMonitorRegister;
-use servo_base::generic_channel::{GenericCallback, GenericSender, RoutedReceiver};
+use servo_base::generic_channel::{GenericCallback, RoutedReceiver};
+#[cfg(feature = "bluetooth")]
+use servo_base::generic_channel::GenericSender;
 pub use servo_base::id::WebViewId;
 use servo_base::id::{EMBEDDER_PIPELINE_NAMESPACE_ID, PipelineNamespace};
 #[cfg(feature = "bluetooth")]
