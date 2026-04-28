@@ -661,6 +661,18 @@ impl Painter {
                 pipeline_id.into(),
                 true,
             );
+
+            // Aurora native scrollbars — draw thumb/track for every
+            // scrollable node in the pipeline's scroll tree, on top of
+            // the iframe so the chrome is never hidden by page content.
+            if let Some(details) = webview_renderer.pipelines.get(&pipeline_id) {
+                crate::scrollbar::draw_scrollbars(
+                    &mut builder,
+                    webview_reference_frame,
+                    clip_chain_id,
+                    &details.scroll_tree,
+                );
+            }
         }
 
         let built_display_list = builder.end();
@@ -724,7 +736,11 @@ impl Painter {
         }
 
         let mut transaction = Transaction::new();
-        if need_zoom {
+        // Aurora: rebuild the root pipeline display list on every scroll
+        // update so our native scrollbar quads (drawn from the scroll tree)
+        // reflect the new offset. WebRender's `set_scroll_offsets` alone
+        // would shift content but leave our thumb stuck at offset=0.
+        if need_zoom || !scroll_offset_updates.is_empty() {
             self.send_root_pipeline_display_list_in_transaction(&mut transaction);
         }
         for update in scroll_offset_updates {
@@ -1004,9 +1020,14 @@ impl Painter {
 
         let mut transaction = Transaction::new();
         let is_root_pipeline = Some(pipeline_id.into()) == webview_renderer.root_pipeline_id;
-        if is_root_pipeline && old_scale != webview_renderer.device_pixels_per_page_pixel() {
+        // Aurora: rebuild the root pipeline display list on every layout-
+        // driven update so our native scrollbar quads (drawn from the
+        // pipeline's scroll tree) track page reflows — lazy-loaded images,
+        // async HTML insertion, accordion expand, etc. — and not just zoom.
+        if is_root_pipeline {
             self.send_root_pipeline_display_list_in_transaction(&mut transaction);
         }
+        let _ = old_scale; // retained for potential future zoom-only paths
 
         transaction.set_display_list(epoch, (pipeline_id, built_display_list));
 
