@@ -576,6 +576,21 @@ impl DocumentEventHandler {
             return;
         }
 
+        // Aurora body-text selection: while a drag-select is in progress
+        // every mousemove extends the selection focus to the new pixel.
+        // We do this BEFORE returning on cursor change so a drag that
+        // crosses cursor-boundaries still updates the selection.
+        if self.window.Document().body_selection_is_dragging() {
+            if let Some(text_pos) = self
+                .window
+                .position_for_point_query(hit_test_result.point_in_frame.cast_unit())
+            {
+                self.window
+                    .Document()
+                    .body_selection_extend(text_pos.node, text_pos.char_offset);
+            }
+        }
+
         // Update the cursor when the mouse moves, if it has changed.
         self.set_cursor(Some(hit_test_result.cursor));
 
@@ -819,6 +834,32 @@ impl DocumentEventHandler {
         // matter if the target is not a node.
         if event.action == MouseButtonAction::Down {
             self.set_sequential_focus_navigation_starting_point(&hit_test_result.node);
+        }
+
+        // Aurora body-text selection: hook left-button down/up to begin
+        // and end a drag-select gesture. We resolve the click pixel into
+        // (text node, character offset) via the layout-side
+        // `query_position_for_point` and stash the anchor in Document.
+        // Mousemove with the button held extends the selection focus.
+        if event.button == embedder_traits::MouseButton::Left {
+            match event.action {
+                MouseButtonAction::Down => {
+                    let document = self.window.Document();
+                    if let Some(text_pos) = self
+                        .window
+                        .position_for_point_query(hit_test_result.point_in_frame.cast_unit())
+                    {
+                        document.body_selection_begin(text_pos.node, text_pos.char_offset);
+                    } else {
+                        // Click landed off any text — clear any leftover
+                        // highlight so the user gets a clean slate.
+                        document.body_selection_clear();
+                    }
+                },
+                MouseButtonAction::Up => {
+                    self.window.Document().body_selection_clear_drag();
+                },
+            }
         }
 
         let Some(element) = hit_test_result

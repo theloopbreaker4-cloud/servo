@@ -524,6 +524,12 @@ pub(crate) struct Document {
     #[no_trace]
     #[conditional_malloc_size_of]
     body_selection: SharedSelection,
+    /// Aurora: while a body-text drag-select gesture is in progress this
+    /// holds the (text node ID, character offset) where mousedown landed.
+    /// Mousemove with the left button held extends the selection focus
+    /// from this anchor; mouseup clears it.
+    #[no_trace]
+    body_selection_drag_anchor: Cell<Option<(style::dom::OpaqueNode, usize)>>,
     /// A timeline for animations which is used for synchronizing animations.
     /// <https://drafts.csswg.org/web-animations/#timeline>
     timeline: Dom<DocumentTimeline>,
@@ -3339,6 +3345,64 @@ impl Document {
             |details_name_groups| details_name_groups.get_or_insert_default(),
         )
     }
+
+    // ── Aurora body-text selection ──────────────────────────────────────
+
+    /// Begin a body-text drag-select gesture. Stores the anchor and seeds
+    /// `body_selection` with an empty range collapsed at the anchor; the
+    /// actual highlight appears once `body_selection_extend` is called
+    /// from the next mousemove with the left button held.
+    pub(crate) fn body_selection_begin(&self, node: style::dom::OpaqueNode, char_offset: usize) {
+        self.body_selection_drag_anchor.set(Some((node, char_offset)));
+        let mut sel = self.body_selection.borrow_mut();
+        sel.enabled = true;
+        sel.character_range = char_offset..char_offset;
+        sel.range = Default::default();
+    }
+
+    /// Extend a body-text drag-select gesture. Only effective if the
+    /// focus point lies in the same DOM node as the anchor (v1 limitation
+    /// — multi-node selection requires a richer data structure than the
+    /// existing `ScriptSelection`'s single character_range, deferred to a
+    /// follow-up).
+    pub(crate) fn body_selection_extend(&self, node: style::dom::OpaqueNode, char_offset: usize) {
+        let Some((anchor_node, anchor_offset)) = self.body_selection_drag_anchor.get() else {
+            return;
+        };
+        if node != anchor_node {
+            // v1: only extend within the originating text node.
+            return;
+        }
+        let (start, end) = if anchor_offset <= char_offset {
+            (anchor_offset, char_offset)
+        } else {
+            (char_offset, anchor_offset)
+        };
+        let mut sel = self.body_selection.borrow_mut();
+        sel.character_range = start..end;
+        sel.enabled = true;
+    }
+
+    /// End a body-text drag-select gesture. The selection itself is left
+    /// visible — `body_selection.enabled` stays true — only the anchor is
+    /// cleared so a fresh mousedown elsewhere starts a new gesture.
+    pub(crate) fn body_selection_clear_drag(&self) {
+        self.body_selection_drag_anchor.set(None);
+    }
+
+    /// Whether a body-text drag is currently in progress.
+    pub(crate) fn body_selection_is_dragging(&self) -> bool {
+        self.body_selection_drag_anchor.get().is_some()
+    }
+
+    /// Disable the body-text selection (called e.g. when the user clicks
+    /// elsewhere with no drag, to clear the previous highlight).
+    pub(crate) fn body_selection_clear(&self) {
+        let mut sel = self.body_selection.borrow_mut();
+        sel.enabled = false;
+        sel.character_range = 0..0;
+        self.body_selection_drag_anchor.set(None);
+    }
 }
 
 #[derive(MallocSizeOf, PartialEq)]
@@ -3639,6 +3703,7 @@ impl Document {
             has_pending_animated_image_update: Cell::new(false),
             selection: MutNullableDom::new(None),
             body_selection: Default::default(),
+            body_selection_drag_anchor: Cell::new(None),
             timeline: DocumentTimeline::new(window, can_gc).as_traced(),
             animations: Animations::new(),
             image_animation_manager: DomRefCell::new(ImageAnimationManager::default()),

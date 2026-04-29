@@ -48,7 +48,7 @@ use layout_api::{
     ElementsFromPointResult, FragmentType, Layout, LayoutImageDestination, PendingImage,
     PendingImageState, PendingRasterizationImage, PhysicalSides, QueryMsg, ReflowGoal,
     ReflowPhasesRun, ReflowRequest, ReflowRequestRestyle, ReflowStatistics, RestyleReason,
-    ScrollContainerQueryFlags, ScrollContainerResponse, TrustedNodeAddress,
+    ScrollContainerQueryFlags, ScrollContainerResponse, TextPositionResult, TrustedNodeAddress,
     combine_id_with_fragment_type,
 };
 use malloc_size_of::MallocSizeOf;
@@ -3082,6 +3082,17 @@ impl Window {
     ) -> Vec<ElementsFromPointResult> {
         self.layout_reflow(QueryMsg::ElementsFromPoint);
         self.layout().query_elements_from_point(point, flags)
+    }
+
+    /// Aurora: resolve a viewport-relative pixel into a text node and
+    /// character offset. Used by body text selection drag handlers in
+    /// `Document` to map mouse coords onto a Selection range endpoint.
+    pub(crate) fn position_for_point_query(
+        &self,
+        point: LayoutPoint,
+    ) -> Option<TextPositionResult> {
+        self.layout_reflow(QueryMsg::ElementsFromPoint);
+        self.layout().query_position_for_point(point)
     }
 
     pub(crate) fn query_effective_overflow(&self, node: &Node) -> Option<AxesOverflow> {
