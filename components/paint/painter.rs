@@ -1571,13 +1571,23 @@ impl Painter {
         }
         let mut scroll_results = Vec::new();
         if let Some(webview_renderer) = self.webview_renderers.get_mut(&webview_id) {
-            for details in webview_renderer.pipelines.values_mut() {
+            for (pipeline_id_iter, details) in webview_renderer.pipelines.iter_mut() {
                 if let Some((id, new_offset)) = details.scroll_tree.scroll_node_or_ancestor(
                     external_id,
                     webrender_api::ScrollLocation::Delta(delta),
                     ScrollType::InputEvents,
                 ) {
+                    // We don't have a real hit-test for our scrollbar drag
+                    // (the cursor is over our chrome, not over the page).
+                    // Synthesize a result pointing at the scrolled node so
+                    // downstream handlers can find the right pipeline.
+                    let hit_test_result = PaintHitTestResult {
+                        pipeline_id: (*pipeline_id_iter).into(),
+                        point_in_viewport: Point2D::zero(),
+                        external_scroll_id: id,
+                    };
                     scroll_results.push(ScrollResult {
+                        hit_test_result,
                         external_scroll_id: id,
                         offset: new_offset,
                     });

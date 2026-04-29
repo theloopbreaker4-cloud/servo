@@ -70,11 +70,13 @@ mod conversions;
 mod gradient;
 mod hit_test;
 mod paint_timing_handler;
+mod position_for_point;
 mod stacking_context;
 
 use background::BackgroundPainter;
 pub(crate) use hit_test::HitTest;
 pub(crate) use paint_timing_handler::PaintTimingHandler;
+pub(crate) use position_for_point::TextHit;
 pub(crate) use stacking_context::*;
 
 const INSERTION_POINT_LOGICAL_WIDTH: Au = Au(AU_PER_PX);

@@ -385,6 +385,14 @@ pub trait Layout {
         point: LayoutPoint,
         flags: ElementsFromPointFlags,
     ) -> Vec<ElementsFromPointResult>;
+    /// Aurora: resolve a viewport-relative pixel to the text node and
+    /// character offset under it. Returns None if the cursor is not over
+    /// a text fragment. Used by the script thread to drive body text
+    /// selection from mouse drag events.
+    fn query_position_for_point(
+        &self,
+        point: LayoutPoint,
+    ) -> Option<TextPositionResult>;
     fn query_effective_overflow(&self, node: TrustedNodeAddress) -> Option<AxesOverflow>;
     fn stylist_mut(&mut self) -> &mut Stylist;
 
@@ -792,6 +800,18 @@ pub struct ElementsFromPointResult {
     /// The [`Cursor`] that's defined on the item that is hit by this
     /// hit test result.
     pub cursor: Cursor,
+}
+
+/// Aurora: result of resolving a viewport-relative pixel into a text
+/// position. Returned by `Layout::query_position_for_point`. Used by
+/// the script thread to drive body text selection (mouse drag).
+#[derive(Clone, Copy, Debug)]
+pub struct TextPositionResult {
+    /// The DOM node owning the text fragment under the cursor.
+    pub node: OpaqueNode,
+    /// Zero-based UTF-16-code-unit offset within that text node.
+    /// Suitable as the `offset` parameter of a DOM `Range` endpoint.
+    pub char_offset: usize,
 }
 
 bitflags! {

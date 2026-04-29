@@ -541,6 +541,22 @@ impl Layout for LayoutThread {
         })
     }
 
+    fn query_position_for_point(
+        &self,
+        point: webrender_api::units::LayoutPoint,
+    ) -> Option<layout_api::TextPositionResult> {
+        with_layout_state(|| {
+            self.stacking_context_tree
+                .borrow()
+                .as_ref()
+                .and_then(|tree| tree.position_for_point(point))
+                .map(|hit| layout_api::TextPositionResult {
+                    node: hit.node,
+                    char_offset: hit.char_offset,
+                })
+        })
+    }
+
     #[servo_tracing::instrument(skip_all)]
     fn query_effective_overflow(&self, node: TrustedNodeAddress) -> Option<AxesOverflow> {
         with_layout_state(|| {
