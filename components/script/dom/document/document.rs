@@ -31,7 +31,7 @@ use hyper_serde::Serde;
 use js::rust::{HandleObject, HandleValue, MutableHandleValue};
 use layout_api::{
     PendingRestyle, ReflowGoal, ReflowPhasesRun, ReflowStatistics, RestyleReason,
-    ScrollContainerQueryFlags, TrustedNodeAddress,
+    ScrollContainerQueryFlags, SharedSelection, TrustedNodeAddress,
 };
 use metrics::{InteractiveFlag, InteractiveWindow, ProgressiveWebMetrics};
 use net_traits::CookieSource::NonHTTP;
@@ -516,6 +516,14 @@ pub(crate) struct Document {
     has_pending_animated_image_update: Cell<bool>,
     /// <https://w3c.github.io/slection-api/#dfn-selection>
     selection: MutNullableDom<Selection>,
+    /// Aurora: a [`SharedSelection`] mirroring the document's currently
+    /// active body-text selection so the layout thread can read it via
+    /// [`Node::selection`] and paint highlights for arbitrary nodes (not
+    /// just `<input>`/`<textarea>`). Mutated from `script` whenever the
+    /// `Selection` DOM object changes; read from `layout` synchronously.
+    #[no_trace]
+    #[conditional_malloc_size_of]
+    body_selection: SharedSelection,
     /// A timeline for animations which is used for synchronizing animations.
     /// <https://drafts.csswg.org/web-animations/#timeline>
     timeline: Dom<DocumentTimeline>,
@@ -3346,6 +3354,16 @@ impl<'dom> LayoutDom<'dom, Document> {
         self.unsafe_get().is_html_document
     }
 
+    /// Aurora: Clone of the document-wide body-text [`SharedSelection`].
+    /// Layout reads this from `Node::selection` for any node that's not
+    /// an `<input>`/`<textarea>` so painted highlights cover regular
+    /// page text. Mutated from script when the user drags or when JS
+    /// calls `Selection.setBaseAndExtent` etc.
+    #[inline]
+    pub(crate) fn body_selection_for_layout(self) -> SharedSelection {
+        self.unsafe_get().body_selection.clone()
+    }
+
     #[inline]
     pub(crate) fn quirks_mode(self) -> QuirksMode {
         self.unsafe_get().quirks_mode.get()
@@ -3620,6 +3638,7 @@ impl Document {
             dirty_canvases: DomRefCell::new(Default::default()),
             has_pending_animated_image_update: Cell::new(false),
             selection: MutNullableDom::new(None),
+            body_selection: Default::default(),
             timeline: DocumentTimeline::new(window, can_gc).as_traced(),
             animations: Animations::new(),
             image_animation_manager: DomRefCell::new(ImageAnimationManager::default()),

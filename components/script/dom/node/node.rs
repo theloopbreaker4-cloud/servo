@@ -2278,12 +2278,18 @@ impl<'dom> LayoutDom<'dom, Node> {
             .into()
     }
 
-    /// Get the selection for the given node. This only works for text nodes that are in
-    /// the shadow DOM of user agent widgets for form controls, specifically for `<input>`
-    /// and `<textarea>`.
+    /// Get the selection for the given node.
     ///
-    /// As we want to expose the selection on the inner text node of the widget's shadow
-    /// DOM, we must find the shadow root and then access the containing element itself.
+    /// Form controls (`<input>` / `<textarea>`) carry their own per-element
+    /// selection state used for caret + range painting inside the field.
+    /// Aurora extends this so any node can also report the document-wide
+    /// body-text selection — the painter uses it to highlight ranges that
+    /// span across regular paragraphs / headings / spans, which Servo did
+    /// not previously support.
+    ///
+    /// As we want to expose the selection on the inner text node of the
+    /// form widget's shadow DOM, we must find the shadow root and then
+    /// access the containing element itself.
     pub(crate) fn selection(self) -> Option<SharedSelection> {
         if let Some(input) = self.downcast::<HTMLInputElement>() {
             return input.selection_for_layout();
@@ -2292,15 +2298,21 @@ impl<'dom> LayoutDom<'dom, Node> {
             return Some(textarea.selection_for_layout());
         }
 
-        let shadow_root = self
-            .containing_shadow_root_for_layout()?
-            .get_host_for_layout();
-        if let Some(input) = shadow_root.downcast::<HTMLInputElement>() {
-            return input.selection_for_layout();
+        if let Some(shadow_root) = self.containing_shadow_root_for_layout() {
+            let host = shadow_root.get_host_for_layout();
+            if let Some(input) = host.downcast::<HTMLInputElement>() {
+                return input.selection_for_layout();
+            }
+            if let Some(textarea) = host.downcast::<HTMLTextAreaElement>() {
+                return Some(textarea.selection_for_layout());
+            }
         }
-        shadow_root
-            .downcast::<HTMLTextAreaElement>()
-            .map(|textarea| textarea.selection_for_layout())
+
+        // Aurora: fall through to the document's body-wide selection.
+        // The painter checks `enabled` and `character_range` before
+        // emitting any highlight quad, so an idle document with no
+        // active drag costs nothing extra here.
+        Some(self.owner_doc_for_layout().body_selection_for_layout())
     }
 
     pub(crate) fn image_url(self) -> Option<ServoUrl> {
